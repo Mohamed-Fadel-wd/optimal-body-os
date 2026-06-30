@@ -27,6 +27,7 @@ export async function login(password: string) {
 }
 
 export function useSyncedState<T>(key: string, fallback: T, token: string | null) {
+  const cloudEnabled = Boolean(apiUrl && token && token !== "local-only");
   const storageKey = `obos-${key}`;
   const [value, setValue] = useState<T>(() => {
     try {
@@ -35,7 +36,7 @@ export function useSyncedState<T>(key: string, fallback: T, token: string | null
       return fallback;
     }
   });
-  const [status, setStatus] = useState<SyncStatus>(apiUrl && token ? "syncing" : "local");
+  const [status, setStatus] = useState<SyncStatus>(cloudEnabled ? "syncing" : "local");
   const [remoteReady, setRemoteReady] = useState(false);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function useSyncedState<T>(key: string, fallback: T, token: string | null
   }, [storageKey, value]);
 
   useEffect(() => {
-    if (!apiUrl || !token) {
+    if (!cloudEnabled) {
       setRemoteReady(false);
       setStatus("local");
       return;
@@ -70,10 +71,10 @@ export function useSyncedState<T>(key: string, fallback: T, token: string | null
       });
 
     return () => controller.abort();
-  }, [key, token]);
+  }, [cloudEnabled, key, token]);
 
   useEffect(() => {
-    if (!apiUrl || !token || !remoteReady) return;
+    if (!cloudEnabled || !token || !remoteReady) return;
     setStatus("syncing");
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
@@ -97,7 +98,7 @@ export function useSyncedState<T>(key: string, fallback: T, token: string | null
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [key, remoteReady, token, value]);
+  }, [cloudEnabled, key, remoteReady, token, value]);
 
   return [value, setValue, status] as const;
 }

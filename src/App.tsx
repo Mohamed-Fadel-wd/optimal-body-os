@@ -113,7 +113,7 @@ function App() {
     setToken(null);
   };
 
-  if (!token) return <Login onLogin={signIn} />;
+  if (!token) return <Login onLogin={signIn} onLocal={() => signIn("local-only")} />;
   const render = () => {
     const props = { recovery, setRecovery, workouts, setWorkouts, exercises, setExercises, go: setPage };
     if (page === "dashboard") return <Dashboard {...props} />;
@@ -152,7 +152,7 @@ function App() {
   );
 }
 
-function Login({ onLogin }: { onLogin: (token: string) => void }) {
+function Login({ onLogin, onLocal }: { onLogin: (token: string) => void; onLocal: () => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -179,8 +179,9 @@ function Login({ onLogin }: { onLogin: (token: string) => void }) {
         <label><span>PRIVATE PASSWORD</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required autoFocus /></label>
         {error && <p className="login-error" role="alert">{error}</p>}
         <button className="google" type="submit" disabled={loading}><CircleUserRound size={20} />{loading ? "Signing in..." : "Continue as Mohamed Fadel"}<ChevronRight size={18} /></button>
+        <button className="local-login" type="button" onClick={onLocal}>Continue on this device</button>
       </form>
-      <small><ShieldCheck size={14} /> Encrypted connection · Protected private profile</small>
+      <small><ShieldCheck size={14} /> Cloud sign-in requires server setup · Device access stays local</small>
     </div>
     <div className="login-visual">
       <div className="orbit one" /><div className="orbit two" />
