@@ -9,6 +9,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
+import { useSyncedState } from "./api";
 
 type Page = "dashboard" | "today" | "log" | "skills" | "analytics" | "recovery" | "game" | "settings";
 type SetRow = { reps: number; duration: number; assistance: number; weight: number; difficulty: number; pain: number; form: string; notes: string };
@@ -81,13 +82,20 @@ function App() {
   });
   const [menu, setMenu] = useState(false);
   const [theme, setTheme] = usePersistent<"dark" | "light">("obos-theme", "dark");
-  const [recovery, setRecovery] = usePersistent<Recovery>("obos-recovery", initialRecovery);
-  const [workouts, setWorkouts] = usePersistent<SavedWorkout[]>("obos-workouts", [
+  const [recovery, setRecovery, recoverySync] = useSyncedState<Recovery>("recovery", initialRecovery);
+  const [workouts, setWorkouts, workoutsSync] = useSyncedState<SavedWorkout[]>("workouts", [
     { id: 1, date: "Jun 27", type: "Push + Rope", duration: 52, calories: 488, avgHr: 136, exercises: 7, assessment: "Push volume improved with stable form." },
     { id: 2, date: "Jun 24", type: "Skill + Conditioning", duration: 61, calories: 612, avgHr: 144, exercises: 5, assessment: "Rope endurance is trending up." },
     { id: 3, date: "Jun 22", type: "Pull + Rope", duration: 58, calories: 522, avgHr: 132, exercises: 8, assessment: "Best 20 kg assisted pull-up volume." }
   ]);
-  const [exercises, setExercises] = usePersistent<Exercise[]>("obos-today", pullTemplate);
+  const [exercises, setExercises, todaySync] = useSyncedState<Exercise[]>("today", pullTemplate);
+  const syncStatus = [recoverySync, workoutsSync, todaySync].includes("offline")
+    ? "offline"
+    : [recoverySync, workoutsSync, todaySync].includes("syncing")
+      ? "syncing"
+      : [recoverySync, workoutsSync, todaySync].every((status) => status === "local")
+        ? "local"
+        : "synced";
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
   if (!signedIn) return <Login onLogin={() => setSignedIn(true)} />;
@@ -108,7 +116,7 @@ function App() {
       <main>
         <header>
           <div className="app-title"><div className="brand-mark"><Zap size={17} /></div><div><span className="eyebrow">OPTIMAL BODY OS</span><h1>{nav.find(n => n[0] === page)?.[1]}</h1></div></div>
-          <div className="header-actions"><button className="icon-btn theme-switch" aria-label="Toggle color mode" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-btn"><Bell size={18} /><i /></button><button className="avatar small" onClick={() => setPage("settings")}>MF</button></div>
+          <div className="header-actions"><span className={`data-sync ${syncStatus}`} title={`Data status: ${syncStatus}`}><i />{syncStatus}</span><button className="icon-btn theme-switch" aria-label="Toggle color mode" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-btn"><Bell size={18} /><i /></button><button className="avatar small" onClick={() => setPage("settings")}>MF</button></div>
         </header>
         <div className="content">{render()}</div>
       </main>
