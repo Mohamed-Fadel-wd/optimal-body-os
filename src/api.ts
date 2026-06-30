@@ -7,7 +7,26 @@ const apiUrl = (import.meta.env.VITE_API_URL ||
   (["localhost", "127.0.0.1"].includes(window.location.hostname) ? localApiUrl : ""))
   .replace(/\/$/, "");
 
-export function useSyncedState<T>(key: string, fallback: T) {
+function expireSession(response: Response) {
+  if (response.status === 401) {
+    localStorage.removeItem("obos-token");
+    window.dispatchEvent(new Event("obos:unauthorized"));
+  }
+}
+
+export async function login(password: string) {
+  if (!apiUrl) throw new Error("The API URL is not configured.");
+  const response = await fetch(`${apiUrl}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Unable to sign in");
+  return payload.token as string;
+}
+
+export function useSyncedState<T>(key: string, fallback: T, token: string | null) {
   const storageKey = `obos-${key}`;
   const [value, setValue] = useState<T>(() => {
     try {
@@ -16,7 +35,7 @@ export function useSyncedState<T>(key: string, fallback: T) {
       return fallback;
     }
   });
-  const [status, setStatus] = useState<SyncStatus>(apiUrl ? "syncing" : "local");
+  const [status, setStatus] = useState<SyncStatus>(apiUrl && token ? "syncing" : "local");
   const [remoteReady, setRemoteReady] = useState(false);
 
   useEffect(() => {
@@ -24,11 +43,19 @@ export function useSyncedState<T>(key: string, fallback: T) {
   }, [storageKey, value]);
 
   useEffect(() => {
-    if (!apiUrl) return;
+    if (!apiUrl || !token) {
+      setRemoteReady(false);
+      setStatus("local");
+      return;
+    }
     const controller = new AbortController();
 
-    fetch(`${apiUrl}/state/${key}`, { signal: controller.signal })
+    fetch(`${apiUrl}/state/${key}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal
+    })
       .then(async (response) => {
+        expireSession(response);
         if (response.status === 404) return null;
         if (!response.ok) throw new Error(`State request failed: ${response.status}`);
         return response.json() as Promise<{ value: T }>;
@@ -43,20 +70,21 @@ export function useSyncedState<T>(key: string, fallback: T) {
       });
 
     return () => controller.abort();
-  }, [key]);
+  }, [key, token]);
 
   useEffect(() => {
-    if (!apiUrl || !remoteReady) return;
+    if (!apiUrl || !token || !remoteReady) return;
     setStatus("syncing");
     const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       fetch(`${apiUrl}/state/${key}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ value }),
         signal: controller.signal
       })
         .then((response) => {
+          expireSession(response);
           if (!response.ok) throw new Error(`State update failed: ${response.status}`);
           setStatus("synced");
         })
@@ -69,7 +97,7 @@ export function useSyncedState<T>(key: string, fallback: T) {
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [key, remoteReady, value]);
+  }, [key, remoteReady, token, value]);
 
   return [value, setValue, status] as const;
 }

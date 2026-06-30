@@ -9,7 +9,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis
 } from "recharts";
-import { useSyncedState } from "./api";
+import { login, useSyncedState } from "./api";
 
 type Page = "dashboard" | "today" | "log" | "skills" | "analytics" | "recovery" | "game" | "settings";
 type SetRow = { reps: number; duration: number; assistance: number; weight: number; difficulty: number; pain: number; form: string; notes: string };
@@ -75,20 +75,20 @@ function usePersistent<T>(key: string, fallback: T) {
 }
 
 function App() {
-  const [signedIn, setSignedIn] = usePersistent("obos-auth", false);
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem("obos-token"));
   const [page, setPage] = useState<Page>(() => {
     const requested = new URLSearchParams(window.location.search).get("screen");
     return nav.some(([id]) => id === requested) ? requested as Page : "dashboard";
   });
   const [menu, setMenu] = useState(false);
   const [theme, setTheme] = usePersistent<"dark" | "light">("obos-theme", "dark");
-  const [recovery, setRecovery, recoverySync] = useSyncedState<Recovery>("recovery", initialRecovery);
+  const [recovery, setRecovery, recoverySync] = useSyncedState<Recovery>("recovery", initialRecovery, token);
   const [workouts, setWorkouts, workoutsSync] = useSyncedState<SavedWorkout[]>("workouts", [
     { id: 1, date: "Jun 27", type: "Push + Rope", duration: 52, calories: 488, avgHr: 136, exercises: 7, assessment: "Push volume improved with stable form." },
     { id: 2, date: "Jun 24", type: "Skill + Conditioning", duration: 61, calories: 612, avgHr: 144, exercises: 5, assessment: "Rope endurance is trending up." },
     { id: 3, date: "Jun 22", type: "Pull + Rope", duration: 58, calories: 522, avgHr: 132, exercises: 8, assessment: "Best 20 kg assisted pull-up volume." }
-  ]);
-  const [exercises, setExercises, todaySync] = useSyncedState<Exercise[]>("today", pullTemplate);
+  ], token);
+  const [exercises, setExercises, todaySync] = useSyncedState<Exercise[]>("today", pullTemplate, token);
   const syncStatus = [recoverySync, workoutsSync, todaySync].includes("offline")
     ? "offline"
     : [recoverySync, workoutsSync, todaySync].includes("syncing")
@@ -97,8 +97,23 @@ function App() {
         ? "local"
         : "synced";
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => {
+    const expire = () => setToken(null);
+    window.addEventListener("obos:unauthorized", expire);
+    return () => window.removeEventListener("obos:unauthorized", expire);
+  }, []);
 
-  if (!signedIn) return <Login onLogin={() => setSignedIn(true)} />;
+  const signIn = (nextToken: string) => {
+    localStorage.setItem("obos-token", nextToken);
+    localStorage.removeItem("obos-auth");
+    setToken(nextToken);
+  };
+  const signOut = () => {
+    localStorage.removeItem("obos-token");
+    setToken(null);
+  };
+
+  if (!token) return <Login onLogin={signIn} />;
   const render = () => {
     const props = { recovery, setRecovery, workouts, setWorkouts, exercises, setExercises, go: setPage };
     if (page === "dashboard") return <Dashboard {...props} />;
@@ -108,7 +123,7 @@ function App() {
     if (page === "analytics") return <Analytics />;
     if (page === "recovery") return <RecoveryPage recovery={recovery} setRecovery={setRecovery} />;
     if (page === "game") return <Campaign />;
-    return <SettingsPage onLogout={() => setSignedIn(false)} />;
+    return <SettingsPage onLogout={signOut} />;
   };
 
   return (
@@ -137,14 +152,35 @@ function App() {
   );
 }
 
-function Login({ onLogin }: { onLogin: () => void }) {
+function Login({ onLogin }: { onLogin: (token: string) => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      onLogin(await login(password));
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Unable to sign in");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return <div className="login">
     <div className="login-panel">
       <div className="login-brand"><div className="brand-mark large"><Zap /></div><span>PRIVATE ATHLETE SYSTEM</span></div>
       <h1>Build the body.<br /><em>Unlock the skill.</em></h1>
       <p>One focused system for training, recovery, and capability.</p>
-      <button className="google" onClick={onLogin}><CircleUserRound size={20} />Continue as Mohamed Fadel<ChevronRight size={18} /></button>
-      <small><ShieldCheck size={14} /> Private profile · Data stored on this device</small>
+      <form className="login-form" onSubmit={submit}>
+        <label><span>PRIVATE PASSWORD</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required autoFocus /></label>
+        {error && <p className="login-error" role="alert">{error}</p>}
+        <button className="google" type="submit" disabled={loading}><CircleUserRound size={20} />{loading ? "Signing in..." : "Continue as Mohamed Fadel"}<ChevronRight size={18} /></button>
+      </form>
+      <small><ShieldCheck size={14} /> Encrypted connection · Protected private profile</small>
     </div>
     <div className="login-visual">
       <div className="orbit one" /><div className="orbit two" />
