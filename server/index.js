@@ -21,6 +21,7 @@ const allowedOrigins = (process.env.CORS_ORIGIN || "http://127.0.0.1:4173,http:/
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const appUrl = process.env.APP_URL || allowedOrigins[0];
 
 if (!mongoUri || !passwordHash || !jwtSecret || jwtSecret.length < 32) {
   console.error("MONGODB_URI, APP_PASSWORD_HASH, and a JWT_SECRET of at least 32 characters are required.");
@@ -55,6 +56,8 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: "1mb" }));
+
+app.get("/", (_request, response) => response.redirect(appUrl));
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
