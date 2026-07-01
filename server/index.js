@@ -1,6 +1,7 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
 import cors from "cors";
+import dns from "node:dns";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import jwt from "jsonwebtoken";
@@ -11,6 +12,10 @@ const mongoUri = process.env.MONGODB_URI;
 const databaseName = process.env.MONGODB_DB || "optimal_body_os";
 const passwordHash = process.env.APP_PASSWORD_HASH;
 const jwtSecret = process.env.JWT_SECRET;
+const dnsServers = (process.env.MONGODB_DNS_SERVERS || "")
+  .split(",")
+  .map((server) => server.trim())
+  .filter(Boolean);
 const allowedKeys = new Set(["recovery", "workouts", "today"]);
 const allowedOrigins = (process.env.CORS_ORIGIN || "http://127.0.0.1:4173,http://localhost:4173")
   .split(",")
@@ -21,6 +26,8 @@ if (!mongoUri || !passwordHash || !jwtSecret || jwtSecret.length < 32) {
   console.error("MONGODB_URI, APP_PASSWORD_HASH, and a JWT_SECRET of at least 32 characters are required.");
   process.exit(1);
 }
+
+if (dnsServers.length) dns.setServers(dnsServers);
 
 const client = new MongoClient(mongoUri);
 await client.connect();
