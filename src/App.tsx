@@ -3,7 +3,7 @@ import {
   Activity, Apple, Award, BarChart3, Bell, CalendarDays, Check, ChevronRight,
   CircleUserRound, Dumbbell, Flame, Gauge, HeartPulse, Home, LogOut, Menu,
   Minus, Moon, Plus, Settings, ShieldCheck, Sparkles, Sun, Target, Timer, Ellipsis,
-  Trophy, TrendingUp, UserRound, Watch, X, Zap
+  Trash2, Trophy, TrendingUp, UserRound, Watch, X, Zap
 } from "lucide-react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart,
@@ -12,10 +12,14 @@ import {
 import { login, useSyncedState } from "./api";
 
 type Page = "dashboard" | "today" | "log" | "skills" | "analytics" | "recovery" | "game" | "settings";
-type SetRow = { reps: number; duration: number; assistance: number; weight: number; difficulty: number; pain: number; form: string; notes: string };
+type SetRow = { reps: number; duration: number; assistance: number; weight: number; difficulty: number; pain: number; form: string; notes: string; completed?: boolean };
 type Exercise = { name: string; target: string; sets: SetRow[] };
 type Recovery = { energy: number; sleep: number; shoulder: number; chest: number; back: number; biceps: number; grip: number; quads: number; glutes: number; calves: number; walking: number; palms: number };
-type SavedWorkout = { id: number; date: string; type: string; duration: number; calories: number; avgHr: number; exercises: number; assessment: string };
+type SavedWorkout = {
+  id: number; date: string; type: string; duration: number; calories: number; avgHr: number;
+  exercises: number; assessment: string; completedAt?: string; totalSets?: number;
+  volume?: number; maxPain?: number; exerciseDetails?: Exercise[];
+};
 
 const nav = [
   ["dashboard", "Home", Home], ["today", "Train", Dumbbell],
@@ -120,7 +124,7 @@ function App() {
     if (page === "today") return <Today {...props} />;
     if (page === "log") return <WorkoutLog workouts={workouts} />;
     if (page === "skills") return <Skills />;
-    if (page === "analytics") return <Analytics />;
+    if (page === "analytics") return <Analytics workouts={workouts} />;
     if (page === "recovery") return <RecoveryPage recovery={recovery} setRecovery={setRecovery} />;
     if (page === "game") return <Campaign />;
     return <SettingsPage onLogout={signOut} />;
@@ -286,15 +290,71 @@ function Today({ exercises, setExercises, workouts, setWorkouts, go }: CommonPro
   const [open, setOpen] = useState(1);
   const [saved, setSaved] = useState(false);
   const [mode, setMode] = useState<"workout" | "skills">("workout");
+  const [sessionStarted] = useState(() => Date.now());
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const updateSet = (ei: number, si: number, key: keyof SetRow, value: string) => {
     const copy = structuredClone(exercises);
     if (key === "form" || key === "notes") (copy[ei].sets[si][key] as string) = value;
+    else if (key === "completed") copy[ei].sets[si].completed = value === "true";
     else (copy[ei].sets[si][key] as number) = Number(value);
     setExercises(copy);
   };
-  const addSet = (ei: number) => { const copy = structuredClone(exercises); copy[ei].sets.push({ ...copy[ei].sets[copy[ei].sets.length - 1] }); setExercises(copy); };
+  const addSet = (ei: number) => {
+    const copy = structuredClone(exercises);
+    copy[ei].sets.push({ ...copy[ei].sets[copy[ei].sets.length - 1], completed: false, notes: "" });
+    setExercises(copy);
+  };
+  const removeSet = (ei: number, si: number) => {
+    const copy = structuredClone(exercises);
+    if (copy[ei].sets.length === 1) return;
+    copy[ei].sets.splice(si, 1);
+    setExercises(copy);
+  };
+  const totalSets = exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0);
+  const completedSets = exercises.reduce((sum, exercise) => sum + exercise.sets.filter(set => set.completed).length, 0);
+  const completedExercises = exercises.filter(exercise => exercise.sets.some(set => set.completed)).length;
+  const elapsedSeconds = Math.max(0, Math.floor((clock - sessionStarted) / 1000));
+  const elapsedLabel = `${String(Math.floor(elapsedSeconds / 60)).padStart(2, "0")}:${String(elapsedSeconds % 60).padStart(2, "0")}`;
   const finish = () => {
-    setWorkouts([{ id: Date.now(), date: "Today", type: "Pull + Rope", duration: 58, calories: 510, avgHr: 134, exercises: exercises.length, assessment: "Strong controlled volume. Monitor shoulder response tomorrow." }, ...workouts]);
+    if (!completedSets) return;
+    const completedAt = new Date();
+    const duration = Math.max(1, Math.round(elapsedSeconds / 60));
+    const completed = exercises.map(exercise => ({
+      ...exercise,
+      sets: exercise.sets.filter(set => set.completed)
+    })).filter(exercise => exercise.sets.length);
+    const allSets = completed.flatMap(exercise => exercise.sets);
+    const volume = Math.round(allSets.reduce((sum, set) => sum + Math.max(0, set.weight) * Math.max(0, set.reps), 0));
+    const maxPain = Math.max(0, ...allSets.map(set => set.pain));
+    const avgRpe = allSets.reduce((sum, set) => sum + set.difficulty, 0) / allSets.length;
+    const assessment = maxPain > 5
+      ? "Session saved. Elevated pain was recorded; review recovery before the next workout."
+      : avgRpe >= 8
+        ? "High-effort session completed. Prioritize recovery and avoid unnecessary extra volume."
+        : "Controlled session completed with sustainable effort.";
+    setWorkouts([{
+      id: completedAt.getTime(),
+      completedAt: completedAt.toISOString(),
+      date: completedAt.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      type: "Pull + Rope",
+      duration,
+      calories: Math.round(duration * 8.5),
+      avgHr: 0,
+      exercises: completed.length,
+      totalSets: completedSets,
+      volume,
+      maxPain,
+      exerciseDetails: completed,
+      assessment
+    }, ...workouts]);
+    setExercises(exercises.map(exercise => ({
+      ...exercise,
+      sets: exercise.sets.map(set => ({ ...set, completed: false }))
+    })));
     setSaved(true); setTimeout(() => { setSaved(false); go("log"); }, 900);
   };
   if (mode === "skills") return <div className="stack train-screen">
@@ -319,22 +379,29 @@ function Today({ exercises, setExercises, workouts, setWorkouts, go }: CommonPro
       <div><span className="eyebrow green">TRAIN</span><h2>Today’s session</h2><p>Log the workout, then move into the skills this session supports.</p></div>
       <div className="train-tabs"><button className="active" onClick={() => setMode("workout")}>Workout</button><button onClick={() => setMode("skills")}>Skills</button></div>
     </section>
-    <section className="workout-hero"><div><span className="eyebrow green">WEEK 5 · SESSION 2</span><h2>Pull + Rope</h2><p>Strength first. Control the eccentric. Leave one clean rep in reserve.</p></div><div className="session-meta"><span><Timer size={16}/>55-65 min</span><span><Flame size={16}/>480-550 kcal</span><span><Target size={16}/>Pull-up foundation</span></div></section>
+    <section className="workout-hero"><div><span className="eyebrow green">WEEK 5 · SESSION 2</span><h2>Pull + Rope</h2><p>Strength first. Control the eccentric. Leave one clean rep in reserve.</p></div><div className="session-meta"><span><Timer size={16}/>{elapsedLabel}</span><span><Flame size={16}/>{Math.round(Math.max(1, elapsedSeconds / 60) * 8.5)} kcal est.</span><span><Target size={16}/>Pull-up foundation</span></div></section>
     <div className="safety"><ShieldCheck size={20}/><div><b>Shoulder protocol active</b><span>Stop any movement that produces sharp pain. Keep scapula controlled during hangs and negatives.</span></div></div>
     <section className="exercise-list">{exercises.map((ex, ei) => <div className={`exercise ${open === ei ? "expanded" : ""}`} key={ex.name}>
-      <button className="exercise-head" onClick={() => setOpen(open === ei ? -1 : ei)}><span className="exercise-num">{String(ei + 1).padStart(2, "0")}</span><div><b>{ex.name}</b><span>{ex.target} · {ex.sets.length} logged sets</span></div><Progress value={ex.sets.filter(s => s.reps || s.duration).length / ex.sets.length * 100}/><ChevronRight size={19}/></button>
-      {open === ei && <div className="sets-wrap"><div className="set-grid header"><span>SET</span><span>REPS / MIN</span><span>ASSIST kg</span><span>RPE</span><span>PAIN</span><span>FORM</span><span>NOTES</span></div>
-        {ex.sets.map((set, si) => <div className="set-grid" key={si}><b>{si + 1}</b><input type="number" value={set.reps || set.duration} onChange={e => updateSet(ei, si, set.reps ? "reps" : "duration", e.target.value)}/><input type="number" value={set.assistance || ""} placeholder="—" onChange={e => updateSet(ei, si, "assistance", e.target.value)}/><input type="number" min="1" max="10" value={set.difficulty} onChange={e => updateSet(ei, si, "difficulty", e.target.value)}/><input className={set.pain > 3 ? "danger-input" : ""} type="number" min="0" max="10" value={set.pain} onChange={e => updateSet(ei, si, "pain", e.target.value)}/><select value={set.form} onChange={e => updateSet(ei, si, "form", e.target.value)}><option>Good</option><option>Clean</option><option>Partial</option><option>Poor</option></select><input value={set.notes} placeholder="Add note" onChange={e => updateSet(ei, si, "notes", e.target.value)}/></div>)}
+      <button className="exercise-head" onClick={() => setOpen(open === ei ? -1 : ei)}><span className="exercise-num">{String(ei + 1).padStart(2, "0")}</span><div><b>{ex.name}</b><span>{ex.target} · {ex.sets.filter(set => set.completed).length}/{ex.sets.length} complete</span></div><Progress value={ex.sets.filter(set => set.completed).length / ex.sets.length * 100}/><ChevronRight size={19}/></button>
+      {open === ei && <div className="sets-wrap"><div className="set-grid header"><span>SET</span><span>DONE</span><span>REPS / MIN</span><span>WEIGHT kg</span><span>ASSIST kg</span><span>RPE</span><span>PAIN</span><span>FORM</span><span>NOTES</span><span/></div>
+        {ex.sets.map((set, si) => <div className={`set-grid ${set.completed ? "set-complete" : ""}`} key={si}><b>{si + 1}</b><button className="set-check" aria-label={`Mark set ${si + 1} complete`} onClick={() => updateSet(ei, si, "completed", String(!set.completed))}><Check size={15}/></button><input type="number" min="0" value={set.reps || set.duration} onChange={e => updateSet(ei, si, set.reps ? "reps" : "duration", e.target.value)}/><input type="number" min="0" value={set.weight || ""} placeholder="—" onChange={e => updateSet(ei, si, "weight", e.target.value)}/><input type="number" min="0" value={set.assistance || ""} placeholder="—" onChange={e => updateSet(ei, si, "assistance", e.target.value)}/><input type="number" min="1" max="10" value={set.difficulty} onChange={e => updateSet(ei, si, "difficulty", e.target.value)}/><input className={set.pain > 3 ? "danger-input" : ""} type="number" min="0" max="10" value={set.pain} onChange={e => updateSet(ei, si, "pain", e.target.value)}/><select value={set.form} onChange={e => updateSet(ei, si, "form", e.target.value)}><option>Good</option><option>Clean</option><option>Partial</option><option>Poor</option></select><input value={set.notes} placeholder="Add note" onChange={e => updateSet(ei, si, "notes", e.target.value)}/><button className="remove-set" aria-label={`Remove set ${si + 1}`} disabled={ex.sets.length === 1} onClick={() => removeSet(ei, si)}><Trash2 size={15}/></button></div>)}
         <button className="add-set" onClick={() => addSet(ei)}><Plus size={15}/>Add set</button></div>}
     </div>)}</section>
-    <div className="finish-bar"><div><span>SESSION PROGRESS</span><Progress value={42}/><b>4 of 9 exercises</b></div><button className="primary" onClick={finish}>{saved ? <><Check size={18}/>Saved</> : <><Check size={18}/>Finish & save workout</>}</button></div>
+    <div className="finish-bar"><div><span>SESSION PROGRESS</span><Progress value={totalSets ? completedSets / totalSets * 100 : 0}/><b>{completedSets}/{totalSets} sets · {completedExercises}/{exercises.length} exercises</b></div><button className="primary" disabled={!completedSets || saved} onClick={finish}>{saved ? <><Check size={18}/>Saved</> : <><Check size={18}/>Finish & save</>}</button></div>
   </div>;
 }
 
 function WorkoutLog({ workouts }: { workouts: SavedWorkout[] }) {
-  return <div className="stack"><div className="page-intro"><div><span className="eyebrow green">TRAINING ARCHIVE</span><h2>Every session compounds.</h2></div><div className="inline-stats"><span><b>{workouts.length + 17}</b> sessions</span><span><b>21.4h</b> trained</span><span><b>10.8k</b> kcal</span></div></div>
-    <div className="log-layout"><section className="panel table-panel"><PanelHead title="Workout history" kicker="MOST RECENT" />{workouts.map((w, i) => <div className="workout-row" key={w.id}><div className="workout-date"><b>{w.date}</b><span>{i === 0 ? "SUNDAY" : "SESSION"}</span></div><div className="workout-type"><span className={`workout-symbol s${i % 3}`}><Dumbbell size={18}/></span><div><b>{w.type}</b><span>{w.exercises} exercises · {w.duration} min</span></div></div><div><span className="cell-label">ACTIVE</span><b>{w.calories} kcal</b></div><div><span className="cell-label">AVG HR</span><b>{w.avgHr} bpm</b></div><div className="assessment"><Sparkles size={15}/><span>{w.assessment}</span></div><ChevronRight size={18}/></div>)}</section>
-      <aside className="panel log-aside"><PanelHead title="June output" kicker="MONTH TO DATE" /><Ring value={76} label="CONSISTENCY"/><div className="log-kpis"><span>Planned <b>13</b></span><span>Completed <b>10</b></span><span>Skipped <b>1</b></span></div><div className="calendar-mini">{Array.from({length: 30}, (_,i) => <i key={i} className={i % 7 === 0 || [3,7,12,16,21,25].includes(i) ? "trained" : i > 27 ? "future" : ""}>{i+1}</i>)}</div></aside>
+  const totalMinutes = workouts.reduce((sum, workout) => sum + workout.duration, 0);
+  const totalCalories = workouts.reduce((sum, workout) => sum + workout.calories, 0);
+  const totalSets = workouts.reduce((sum, workout) => sum + (workout.totalSets || 0), 0);
+  const consistency = Math.min(100, Math.round(workouts.filter(workout => {
+    const date = workout.completedAt ? new Date(workout.completedAt) : null;
+    return date && Date.now() - date.getTime() < 28 * 86400000;
+  }).length / 12 * 100));
+  return <div className="stack"><div className="page-intro"><div><span className="eyebrow green">TRAINING ARCHIVE</span><h2>Every session compounds.</h2></div><div className="inline-stats"><span><b>{workouts.length}</b> sessions</span><span><b>{(totalMinutes / 60).toFixed(1)}h</b> trained</span><span><b>{totalCalories.toLocaleString()}</b> kcal</span></div></div>
+    <div className="log-layout"><section className="panel table-panel"><PanelHead title="Workout history" kicker="MOST RECENT" />{workouts.length === 0 && <div className="empty-state"><Dumbbell size={24}/><b>No workouts saved yet</b><span>Complete your first session to build the archive.</span></div>}{workouts.map((w, i) => <div className="workout-row" key={w.id}><div className="workout-date"><b>{w.date}</b><span>{w.completedAt ? new Date(w.completedAt).toLocaleDateString(undefined, { weekday: "short" }).toUpperCase() : "SESSION"}</span></div><div className="workout-type"><span className={`workout-symbol s${i % 3}`}><Dumbbell size={18}/></span><div><b>{w.type}</b><span>{w.exercises} exercises · {w.totalSets || "—"} sets · {w.duration} min</span></div></div><div><span className="cell-label">VOLUME</span><b>{w.volume ? `${w.volume.toLocaleString()} kg` : "—"}</b></div><div><span className="cell-label">MAX PAIN</span><b>{w.maxPain ?? "—"}/10</b></div><div className="assessment"><Sparkles size={15}/><span>{w.assessment}</span></div><ChevronRight size={18}/></div>)}</section>
+      <aside className="panel log-aside"><PanelHead title="Recent output" kicker="LIVE DATA" /><Ring value={consistency} label="CONSISTENCY"/><div className="log-kpis"><span>Sessions <b>{workouts.length}</b></span><span>Sets <b>{totalSets}</b></span><span>Minutes <b>{totalMinutes}</b></span></div></aside>
     </div></div>;
 }
 
@@ -346,13 +413,25 @@ function Skills() {
     </div></div>;
 }
 
-function Analytics() {
-  const [metric, setMetric] = useState("pushups");
-  return <div className="stack"><div className="page-intro"><div><span className="eyebrow green">PERFORMANCE INTELLIGENCE</span><h2>Your trend is the truth.</h2></div><div className="segments">{[["pushups","Strength"],["assist","Pull-up"],["rope","Conditioning"]].map(x => <button className={metric === x[0] ? "active" : ""} onClick={() => setMetric(x[0])} key={x[0]}>{x[1]}</button>)}</div></div>
-    <div className="stat-grid"><Metric icon={TrendingUp} label="PUSH-UP GAIN" value="+43" unit="%" delta="5-week trend"/><Metric icon={Minus} label="ASSISTANCE" value="-10" unit="kg" delta="Improving"/><Metric icon={Timer} label="DEAD HANG" value="+12" unit="sec" delta="New PR"/><Metric icon={Activity} label="FATIGUE RISK" value="Low" unit="" delta="18 / 100"/></div>
-    <div className="analytics-grid"><section className="panel chart-panel"><PanelHead title={metric === "assist" ? "Pull-up assistance" : metric === "rope" ? "Rope minutes" : "Push-up progression"} kicker="5-WEEK TREND"/><div className="chart"><ResponsiveContainer><LineChart data={history}><CartesianGrid stroke="#202a38" vertical={false}/><XAxis dataKey="week"/><YAxis/><Tooltip content={<ChartTip/>}/><Line type="monotone" dataKey={metric} stroke="#7cf56b" strokeWidth={3} dot={{fill:"#7cf56b",r:4}}/></LineChart></ResponsiveContainer></div></section>
-      <section className="panel"><PanelHead title="Weekly calorie burn" kicker="WORK CAPACITY"/><div className="chart"><ResponsiveContainer><BarChart data={history}><XAxis dataKey="week"/><Tooltip content={<ChartTip/>}/><Bar dataKey="calories" fill="#35a7ff" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer></div></section></div>
-    <div className="analytics-grid lower"><section className="panel"><PanelHead title="Recovery vs performance" kicker="CORRELATION"/><div className="insight"><div className="insight-score">+0.72</div><div><b>Strong positive relationship</b><p>Your best sessions follow sleep scores of 7+. Protect the night before pull training.</p></div></div><div className="heat-strip">{[5,6,8,7,9,4,8,7,8,6,9,8,7,5].map((n,i)=><i key={i} style={{opacity:n/10}}/>)}</div></section>
+function Analytics({ workouts }: { workouts: SavedWorkout[] }) {
+  const [metric, setMetric] = useState<"duration" | "sets" | "volume">("duration");
+  const analyticsData = [...workouts].reverse().slice(-10).map((workout, index) => ({
+    session: `S${index + 1}`,
+    duration: workout.duration,
+    sets: workout.totalSets || 0,
+    volume: workout.volume || 0,
+    calories: workout.calories
+  }));
+  const totalMinutes = workouts.reduce((sum, workout) => sum + workout.duration, 0);
+  const totalSets = workouts.reduce((sum, workout) => sum + (workout.totalSets || 0), 0);
+  const totalVolume = workouts.reduce((sum, workout) => sum + (workout.volume || 0), 0);
+  const averageDuration = workouts.length ? Math.round(totalMinutes / workouts.length) : 0;
+  const elevatedPainSessions = workouts.filter(workout => (workout.maxPain || 0) > 5).length;
+  return <div className="stack"><div className="page-intro"><div><span className="eyebrow green">PERFORMANCE INTELLIGENCE</span><h2>Your trend is the truth.</h2></div><div className="segments">{[["duration","Duration"],["sets","Sets"],["volume","Volume"]].map(([id,label]) => <button className={metric === id ? "active" : ""} onClick={() => setMetric(id as typeof metric)} key={id}>{label}</button>)}</div></div>
+    <div className="stat-grid"><Metric icon={Dumbbell} label="SESSIONS" value={String(workouts.length)} unit="" delta="Saved workouts"/><Metric icon={Timer} label="AVG DURATION" value={String(averageDuration)} unit="min" delta={`${totalMinutes} total minutes`}/><Metric icon={TrendingUp} label="TRAINING VOLUME" value={totalVolume.toLocaleString()} unit="kg" delta={`${totalSets} completed sets`}/><Metric icon={Activity} label="PAIN FLAGS" value={String(elevatedPainSessions)} unit="" delta="Sessions above 5/10"/></div>
+    <div className="analytics-grid"><section className="panel chart-panel"><PanelHead title={metric === "sets" ? "Completed sets" : metric === "volume" ? "Training volume" : "Session duration"} kicker="SAVED WORKOUTS"/><div className="chart">{analyticsData.length ? <ResponsiveContainer><LineChart data={analyticsData}><CartesianGrid stroke="#202a38" vertical={false}/><XAxis dataKey="session"/><YAxis/><Tooltip content={<ChartTip/>}/><Line type="monotone" dataKey={metric} stroke="#7cf56b" strokeWidth={3} dot={{fill:"#7cf56b",r:4}}/></LineChart></ResponsiveContainer> : <div className="chart-empty">Complete a workout to start your trend.</div>}</div></section>
+      <section className="panel"><PanelHead title="Calorie estimate" kicker="SAVED WORKOUTS"/><div className="chart">{analyticsData.length ? <ResponsiveContainer><BarChart data={analyticsData}><XAxis dataKey="session"/><Tooltip content={<ChartTip/>}/><Bar dataKey="calories" fill="#35a7ff" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer> : <div className="chart-empty">No workout data yet.</div>}</div></section></div>
+    <div className="analytics-grid lower"><section className="panel"><PanelHead title="Training signal" kicker="CURRENT DATA"/><div className="insight"><div className="insight-score">{workouts.length}</div><div><b>{workouts.length >= 6 ? "A useful trend is forming" : "Build your baseline"}</b><p>{workouts.length >= 6 ? "Your saved sessions now provide enough history to compare duration, volume, and completed sets." : "Complete at least six sessions before treating short-term changes as a reliable trend."}</p></div></div></section>
       <section className="panel forecast"><PanelHead title="Readiness forecast" kicker="AI ESTIMATE"/>{[["Strict pull-up","8-12 weeks",64],["Pistol squat","10-14 weeks",43],["Wall handstand","6-9 weeks",36]].map(x => <div key={x[0] as string}><span>{x[0]}</span><Progress value={x[2] as number}/><b>{x[1]}</b></div>)}</section></div>
   </div>;
 }
