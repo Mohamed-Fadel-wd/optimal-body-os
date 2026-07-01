@@ -39,7 +39,7 @@ jobs:
         run: pnpm build
         env:
           VITE_BASE_PATH: /${{ github.event.repository.name }}/
-          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_API_URL: https://optimal-body-os-api.onrender.com/api
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
