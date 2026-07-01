@@ -42,6 +42,21 @@ After pushing to GitHub:
 
 The workflow builds the Vite app and deploys the `dist` folder to GitHub Pages.
 
+## API Deployment
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Mohamed-Fadel-wd/optimal-body-os)
+
+The Render Blueprint creates a free Node web service, prompts for `MONGODB_URI`
+and `APP_PASSWORD_HASH`, generates `JWT_SECRET`, and checks `/api/health`.
+
+After Render creates the service:
+
+1. Copy its outbound IP ranges from **Connect > Outbound** into the Atlas project
+   IP access list.
+2. Set the GitHub repository Actions variable `VITE_API_URL` to the Render service
+   URL followed by `/api`.
+3. Redeploy GitHub Pages.
+
 GitHub Pages only hosts the frontend. Deploy the Node API (`server/index.js`) to a
 Node host such as Render, Railway, or Fly.io, then set `VITE_API_URL` in the GitHub
 repository Actions variable to `https://YOUR-API-HOST/api`.
